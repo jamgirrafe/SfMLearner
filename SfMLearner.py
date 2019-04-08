@@ -61,7 +61,7 @@ class SfMLearner(object):
 
                 if opt.smooth_weight > 0:
                     smooth_loss += opt.smooth_weight/(2**s) * \
-                        self.compute_smooth_loss(pred_disp[s])
+                        self.compute_smooth_loss(pred_disp[s], curr_tgt_image, 'exp', 0.1)
 
                 for i in range(opt.num_source):
                     # Inverse warp the source image to the target image frame
@@ -153,18 +153,30 @@ class SfMLearner(object):
             logits=tf.reshape(pred, [-1, 2]))
         return tf.reduce_mean(l)
 
-    def compute_smooth_loss(self, pred_disp):
+
+    def compute_smooth_loss(self, disp, image, smooth_type = 'linear', alpha = 10.0):
         def gradient(pred):
             D_dy = pred[:, 1:, :, :] - pred[:, :-1, :, :]
             D_dx = pred[:, :, 1:, :] - pred[:, :, :-1, :]
             return D_dx, D_dy
-        dx, dy = gradient(pred_disp)
-        dx2, dxdy = gradient(dx)
-        dydx, dy2 = gradient(dy)
-        return tf.reduce_mean(tf.abs(dx2)) + \
-               tf.reduce_mean(tf.abs(dxdy)) + \
-               tf.reduce_mean(tf.abs(dydx)) + \
-               tf.reduce_mean(tf.abs(dy2))
+
+        disp_dx, disp_dy= gradient(disp)
+        disp_dx2, disp_dxdy = gradient(disp_dx)
+        disp_dydx, disp_dy2 = gradient(disp_dy)
+
+        if smooth_type == 'linear':
+            smooth_loss = tf.reduce_mean(tf.abs(disp_dx2)) + \
+                            tf.reduce_mean(tf.abs(disp_dxdy)) + \
+                            tf.reduce_mean(tf.abs(disp_dydx)) + \
+                            tf.reduce_mean(tf.abs(disp_dy2))
+        elif smooth_type == 'exp':
+            image_dx, image_dy = gradient(image)
+            weight_x = tf.exp(-1*alpha*tf.abs(image_dx))
+            weight_y = tf.exp(-1*alpha*tf.abs(image_dy))
+            smooth_loss = tf.reduce_mean(tf.abs(disp_dx * weight_x)) + \
+                        tf.reduce_mean(tf.abs(disp_dy * weight_y))
+        
+        return smooth_loss
 
     def collect_summaries(self):
         opt = self.opt
